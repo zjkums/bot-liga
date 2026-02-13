@@ -1,0 +1,15 @@
+{
+  "rolesEquipos": {
+    "EquipoA": "ID_DEL_ROL_EQUIPOA",
+    "EquipoB": "ID_DEL_ROL_EQUIPOB"
+  },
+  "roles": {
+    "subdt": "ID_ROL_SUBDT",
+    "dt": "ID_ROL_DT"
+  },
+  "emojis": {
+    "success": "✅",
+    "error": "❌",
+    "volleyball": "🏐"
+  }
+}
