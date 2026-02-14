@@ -1,73 +1,70 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const path = require("path");
+const db = new QuickDB({ filePath: path.join(__dirname, "..", "data", "database.sqlite") });
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('fichar')
-        .setDescription('📝 Iniciar una propuesta de contrato profesional')
+        .setDescription('🤝 Enviar una propuesta formal de contrato a un jugador')
         .addUserOption(o => o.setName('jugador').setDescription('Jugador a contratar').setRequired(true))
-        .addRoleOption(o => o.setName('equipo').setDescription('Equipo oficial').setRequired(true))
-        .addIntegerOption(o => o.setName('valor').setDescription('Costo del contrato').setRequired(true)),
+        .addRoleOption(o => o.setName('equipo').setDescription('Equipo que representa').setRequired(true))
+        .addIntegerOption(o => o.setName('valor').setDescription('Monto del contrato').setRequired(true)),
 
     async execute(interaction) {
+        const config = await db.get(`config_roles_${interaction.guild.id}`);
+        if (!config) return interaction.reply({ content: '❌ Usa `/configurar_liga` primero.', ephemeral: true });
+
+        const isDT = interaction.member.roles.cache.has(config.dt) || interaction.member.roles.cache.has(config.subdt);
+        if (!isDT) return interaction.reply({ content: '❌ No tienes autorización de la directiva para fichar.', ephemeral: true });
+
         const jugador = interaction.options.getUser('jugador');
         const equipo = interaction.options.getRole('equipo');
         const valor = interaction.options.getInteger('valor');
-        const config = await db.get(`config_${interaction.guild.id}`);
-        
-        const cooldown = await db.get(`cooldown_baja_${jugador.id}`);
-        if (cooldown && Date.now() < cooldown) {
-            return interaction.reply({ content: "❌ Este jugador tiene una sanción activa por auto-baja y no puede fichar aún.", ephemeral: true });
-        }
 
-        const saldo = await db.get(`presupuesto_${equipo.id}`) || 0;
-        if (saldo < valor) return interaction.reply(`❌ Fondos insuficientes. El club solo tiene **$${saldo.toLocaleString()}**.`);
+        if (equipo.members.size >= 16) return interaction.reply({ content: `❌ El equipo **${equipo.name}** ya tiene el cupo máximo (16/16).`, ephemeral: true });
+
+        const saldoClub = await db.get(`presupuesto_${equipo.id}`) || 0;
+        if (saldoClub < valor) return interaction.reply({ content: `❌ Fondos insuficientes. Presupuesto: **$${saldoClub.toLocaleString()}**.`, ephemeral: true });
 
         const embedOferta = new EmbedBuilder()
             .setTitle('📋 Propuesta de Contrato Profesional')
             .setColor('#2ecc71')
             .setThumbnail(jugador.displayAvatarURL({ dynamic: true }))
-            .setDescription(`¡Atención ${jugador}! Has recibido una oferta formal para unirte a las filas de un club oficial.`)
+            .setDescription(`¡Atención ${jugador}! Has recibido una oferta para unirte a **${equipo.name}**.`)
             .addFields(
-                { name: '🏃 Jugador Destino', value: `${jugador}\n(\`${jugador.tag}\`)`, inline: true },
-                { name: '🛡️ Club Interesado', value: `${equipo}`, inline: true },
-                { name: '💰 Valor Contrato', value: `\`$${valor.toLocaleString()}\``, inline: true },
-                { name: '🕒 Oferta Vence', value: 'En 60 segundos', inline: false }
+                { name: '🛡️ Club', value: `${equipo}`, inline: true },
+                { name: '💰 Valor', value: `\`$${valor.toLocaleString()}\``, inline: true }
             )
-            .setFooter({ text: 'Liga de Voleibol - Mercado de Pases', iconURL: interaction.guild.iconURL() })
-            .setTimestamp();
+            .setFooter({ text: 'La oferta expira en 60 segundos' });
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('f_si').setLabel('Aceptar Contrato').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-            new ButtonBuilder().setCustomId('f_no').setLabel('Declinaro').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId('f_si').setLabel('Firmar Contrato').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+            new ButtonBuilder().setCustomId('f_no').setLabel('Declinar').setStyle(ButtonStyle.Danger)
         );
 
         const msg = await interaction.reply({ content: `${jugador}`, embeds: [embedOferta], components: [row], fetchReply: true });
-        
         const collector = msg.createMessageComponentCollector({ filter: i => i.user.id === jugador.id, time: 60000 });
 
         collector.on('collect', async i => {
             if (i.customId === 'f_si') {
                 const miembro = await interaction.guild.members.fetch(jugador.id);
                 await db.sub(`presupuesto_${equipo.id}`, valor);
+                await db.add(`cartera_${jugador.id}`, valor);
                 await db.set(`contrato_${jugador.id}`, valor);
+                
                 await miembro.roles.add(equipo);
+                await miembro.roles.remove(config.libre).catch(() => {});
 
                 const exito = new EmbedBuilder()
                     .setTitle('🎉 ¡Fichaje Oficializado!')
                     .setColor('#2ecc71')
-                    .setThumbnail(jugador.displayAvatarURL())
-                    .setDescription(`El contrato ha sido firmado. **${jugador.username}** ahora es parte de **${equipo.name}**.`)
-                    .addFields(
-                        { name: '💵 Inversión Final', value: `\`$${valor.toLocaleString()}\``, inline: true },
-                        { name: '📅 Fecha de Firma', value: `<t:${Math.floor(Date.now() / 1000)}:d>`, inline: true }
-                    )
-                    .setFooter({ text: 'Operación Registrada Exitosamente' });
+                    .setDescription(`**${jugador.username}** se une oficialmente a la plantilla de **${equipo.name}**.`)
+                    .addFields({ name: '💵 Inversión', value: `\`$${valor.toLocaleString()}\``, inline: true });
 
                 await i.update({ content: '', embeds: [exito], components: [] });
             } else {
-                await i.update({ content: `❌ La oferta de **${equipo.name}** fue rechazada por el jugador.`, embeds: [], components: [] });
+                await i.update({ content: '❌ Oferta rechazada.', embeds: [], components: [] });
             }
         });
     }

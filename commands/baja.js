@@ -1,51 +1,46 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const path = require("path");
+const db = new QuickDB({ filePath: path.join(__dirname, "..", "data", "database.sqlite") });
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('baja')
-        .setDescription('📉 Abandonar un equipo o tramitar baja de jugador')
-        .addRoleOption(o => o.setName('equipo').setDescription('Equipo actual del jugador').setRequired(true))
-        .addUserOption(o => o.setName('jugador').setDescription('Jugador (vacío si eres tú)').setRequired(false)),
+        .setDescription('📉 Tramitar la salida de un jugador del club')
+        .addRoleOption(o => o.setName('equipo').setDescription('Equipo emisor').setRequired(true))
+        .addUserOption(o => o.setName('jugador').setDescription('Jugador a desvincular').setRequired(true)),
 
     async execute(interaction) {
+        const config = await db.get(`config_roles_${interaction.guild.id}`);
+        const isStaff = interaction.member.roles.cache.has(config?.dt) || interaction.member.roles.cache.has(config?.subdt);
+        if (!isStaff) return interaction.reply({ content: '❌ No tienes permisos de gestión técnica.', ephemeral: true });
+
         const equipo = interaction.options.getRole('equipo');
-        const usuario = interaction.options.getUser('jugador') || interaction.user;
-        const config = await db.get(`config_${interaction.guild.id}`);
-        const valorC = await db.get(`contrato_${usuario.id}`);
-        const esAutoBaja = usuario.id === interaction.user.id;
-
+        const usuario = interaction.options.getUser('jugador');
         const miembro = await interaction.guild.members.fetch(usuario.id);
-        const reembolso = valorC ? Math.floor(valorC * 0.5) : 0;
 
-        if (esAutoBaja) {
-            const cd = await db.get(`cooldown_baja_${usuario.id}`);
-            if (cd && Date.now() < cd) {
-                const dias = Math.ceil((cd - Date.now()) / (1000 * 60 * 60 * 24));
-                return interaction.reply({ content: `⚠️ Sanción activa. Debes esperar **${dias} días** para darte de baja nuevamente.`, ephemeral: true });
-            }
-            await db.set(`cooldown_baja_${usuario.id}`, Date.now() + (7 * 24 * 60 * 60 * 1000));
-        }
+        const valorC = await db.get(`contrato_${usuario.id}`) || 0;
+        const cartera = await db.get(`cartera_${usuario.id}`) || 0;
 
-        await miembro.roles.remove(equipo);
+        const reembolso = Math.floor(valorC * 0.5);
+        const multa = Math.floor(cartera * 0.5);
+
         await db.add(`presupuesto_${equipo.id}`, reembolso);
+        await db.sub(`cartera_${usuario.id}`, multa);
         await db.delete(`contrato_${usuario.id}`);
+        
+        await miembro.roles.remove(equipo);
+        await miembro.roles.add(config.libre).catch(() => {});
 
         const embed = new EmbedBuilder()
-            .setTitle(esAutoBaja ? '🚪 Salida Voluntaria de Plantilla' : '📉 Baja Administrativa de Jugador')
+            .setTitle('📉 Baja Procesada')
             .setColor('#e74c3c')
-            .setThumbnail(usuario.displayAvatarURL({ dynamic: true }))
-            .setDescription(`Se ha procesado la desvinculación oficial del jugador.`)
+            .setDescription(`Se ha rescindido el contrato de **${usuario.username}**.`)
             .addFields(
-                { name: '👤 Jugador Saliente', value: `${usuario}\n(\`${usuario.tag}\`)`, inline: true },
-                { name: '🛡️ Club Anterior', value: `${equipo.name}`, inline: true },
-                { name: '💰 Reembolso al Club', value: `\`$${reembolso.toLocaleString()}\``, inline: true },
-                { name: '📅 Fecha y Hora', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
-            )
-            .setFooter({ text: 'Sistema de Gestión de Plantillas' })
-            .setTimestamp();
+                { name: '💰 Reembolso Club', value: `\`$${reembolso.toLocaleString()}\``, inline: true },
+                { name: '💸 Sanción Jugador', value: `\`$${multa.toLocaleString()}\``, inline: true }
+            );
 
-        return interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed] });
     }
 };

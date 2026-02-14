@@ -1,14 +1,10 @@
-require('dotenv').config(); // Carga las variables del archivo .env
-const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require('discord.js');
+require('dotenv').config(); 
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
-// const revisarPrestamos = require('./utils/revisarPrestamos'); 
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
-
-// Leemos la ID del canal desde el archivo .env
-const CANAL_MERCADO_ID = process.env.CANAL_MERCADO_ID;
 
 client.commands = new Collection();
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
@@ -21,8 +17,7 @@ for (const file of commandFiles) {
 
 client.once('ready', () => {
     console.log(`🤖 Bot conectado como ${client.user.tag}`);
-    console.log(`🏦 Sistema de economía y mercado de pases listo.`);
-    // if (typeof revisarPrestamos === 'function') revisarPrestamos();
+    console.log(`🏦 Sistema de economía y gestión de liga listo.`);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -32,32 +27,8 @@ client.on('interactionCreate', async interaction => {
     if (!command) return;
 
     try {
+        // Ejecuta el comando normalmente
         await command.execute(interaction);
-
-        // --- SISTEMA DE LOGS PARA EL CANAL DE MERCADO ---
-        const comandosMercado = ['fichar', 'baja', 'transferir', 'prestamo'];
-        
-        if (comandosMercado.includes(interaction.commandName)) {
-            const canalMercado = interaction.guild.channels.cache.get(CANAL_MERCADO_ID);
-            
-            // Si el canal existe y el comando ya respondió
-            if (canalMercado && (interaction.replied || interaction.deferred)) {
-                // Esperamos un momento para capturar el embed final
-                setTimeout(async () => {
-                    try {
-                        const mensajeOriginal = await interaction.fetchReply();
-                        if (mensajeOriginal.embeds.length > 0) {
-                            await canalMercado.send({ 
-                                content: `📦 **Registro Oficial de Mercado**`, 
-                                embeds: [mensajeOriginal.embeds[0]] 
-                            });
-                        }
-                    } catch (e) {
-                        console.log("No se pudo enviar el log al canal de mercado:", e.message);
-                    }
-                }, 2500);
-            }
-        }
 
     } catch (error) {
         console.error("Error detectado en el comando:", error);
@@ -72,5 +43,5 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Login usando la variable de entorno
+// Login usando la variable de entorno configurada en el panel
 client.login(process.env.DISCORD_TOKEN);

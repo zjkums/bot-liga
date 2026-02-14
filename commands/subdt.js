@@ -1,42 +1,47 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const path = require("path");
+const db = new QuickDB({ filePath: path.join(__dirname, "..", "data", "database.sqlite") });
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('subdt')
-        .setDescription('🥈 Asignar un Sub DT oficial para un equipo')
-        .addUserOption(o => o.setName('usuario').setDescription('El usuario a ascender').setRequired(true))
-        .addRoleOption(o => o.setName('equipo').setDescription('Equipo al que pertenecerá').setRequired(true)),
+        .setDescription('📋 Asignar un Sub DT a un equipo (Máximo 2)')
+        .addUserOption(o => o.setName('usuario').setDescription('Usuario a designar').setRequired(true))
+        .addRoleOption(o => o.setName('equipo').setDescription('Equipo correspondiente').setRequired(true)),
 
     async execute(interaction) {
+        const config = await db.get(`config_roles_${interaction.guild.id}`);
+        if (!config) return interaction.reply({ content: '❌ Configura los roles con `/configurar_liga` primero.', ephemeral: true });
+
         const usuario = interaction.options.getUser('usuario');
         const equipo = interaction.options.getRole('equipo');
-        const config = await db.get(`config_${interaction.guild.id}`);
-
-        const esStaff = config?.staffRoles?.some(id => interaction.member.roles.cache.has(id));
-        const esDT = interaction.member.roles.cache.has(config?.dtRole) && interaction.member.roles.cache.has(equipo.id);
-
-        if (!esStaff && !esDT) return interaction.reply({ content: "❌ No tienes autoridad para nombrar cargos en este equipo.", ephemeral: true });
-
         const miembro = await interaction.guild.members.fetch(usuario.id);
-        await miembro.roles.add(config.subDtRole);
-        await db.set(`subdt_${usuario.id}`, equipo.id);
+
+        // LÓGICA DE LÍMITE: Contar cuántos tienen el rol de Sub DT en ese equipo
+        const subsActuales = equipo.members.filter(m => m.roles.cache.has(config.subdt)).size;
+        
+        if (subsActuales >= 2) {
+            return interaction.reply({ 
+                content: `❌ El equipo **${equipo.name}** ya tiene el cupo máximo de Sub DTs (2/2).`, 
+                ephemeral: true 
+            });
+        }
+
+        await miembro.roles.add([config.subdt, equipo.id]);
+        await miembro.roles.remove(config.libre).catch(() => {});
 
         const embed = new EmbedBuilder()
-            .setTitle('🥈 Nombramiento de Cuerpo Técnico')
+            .setTitle('📋 Nuevo Sub DT Designado')
             .setColor('#3498db')
-            .setThumbnail(usuario.displayAvatarURL({ dynamic: true }))
-            .setDescription(`Se ha oficializado el ascenso de un nuevo miembro administrativo para el club.`)
+            .setThumbnail(usuario.displayAvatarURL())
+            .setDescription(`Se han otorgado permisos de gestión técnica en **${equipo.name}**.`)
             .addFields(
-                { name: '👤 Nuevo Sub DT', value: `${usuario}\n(\`${usuario.tag}\`)`, inline: true },
-                { name: '🏟️ Equipo Asignado', value: `${equipo}`, inline: true },
-                { name: '🔑 Rango', value: `\`Asistente Técnico\``, inline: true },
-                { name: '📅 Fecha Efectiva', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
+                { name: '👤 Usuario', value: `${usuario}`, inline: true },
+                { name: '🛡️ Equipo', value: `${equipo.name}`, inline: true }
             )
-            .setFooter({ text: 'Sistema de Gestión de Cargos - Liga de Voleibol' })
-            .setTimestamp();
+            .setFooter({ text: `Cupos Sub DT: ${subsActuales + 1}/2` });
 
-        return interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed] });
     }
 };

@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { QuickDB } = require("quick.db");
-const db = new QuickDB();
+const path = require("path");
+const db = new QuickDB({ filePath: path.join(__dirname, "..", "data", "database.sqlite") });
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -17,38 +18,37 @@ module.exports = {
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
         const equipo = interaction.options.getRole('equipo');
-        const saldo = await db.get(`presupuesto_${equipo.id}`) || 0;
 
         if (sub === 'ver') {
+            const saldo = await db.get(`presupuesto_${equipo.id}`) || 0;
             const embed = new EmbedBuilder()
                 .setTitle(`🏦 Bóveda Bancaria: ${equipo.name}`)
                 .setColor('#3498db')
                 .setThumbnail(interaction.guild.iconURL())
-                .setDescription(`Consulta de fondos oficiales para transacciones de mercado.`)
                 .addFields(
-                    { name: '🛡️ Entidad Deportiva', value: `${equipo}`, inline: true },
-                    { name: '💰 Capital en Bóveda', value: `\`$${saldo.toLocaleString()}\``, inline: true },
-                    { name: '🕒 Última Sincronización', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: false }
+                    { name: '💰 Capital Actual', value: `\`$${saldo.toLocaleString()}\``, inline: true },
+                    { name: '🕒 Estado', value: 'Sincronizado', inline: true }
                 )
                 .setTimestamp();
             return interaction.reply({ embeds: [embed] });
         }
 
-        // Lógica de Modificación para Staff
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: '❌ Solo administradores pueden modificar presupuestos.', ephemeral: true });
+        }
+
         const monto = interaction.options.getInteger('monto');
         await db.add(`presupuesto_${equipo.id}`, monto);
         const nuevoTotal = await db.get(`presupuesto_${equipo.id}`);
 
         const embedMod = new EmbedBuilder()
-            .setTitle('⚖️ Ajuste de Tesorería Registrado')
+            .setTitle('⚖️ Ajuste de Tesorería')
             .setColor(monto > 0 ? '#2ecc71' : '#e74c3c')
+            .setDescription(`Se ha registrado un movimiento en las arcas de **${equipo.name}**.`)
             .addFields(
-                { name: '🏟️ Club', value: `${equipo.name}`, inline: true },
                 { name: '📥 Movimiento', value: `\`$${monto.toLocaleString()}\``, inline: true },
                 { name: '🏦 Saldo Final', value: `\`$${nuevoTotal.toLocaleString()}\``, inline: true }
-            )
-            .setTimestamp();
-
-        return interaction.reply({ embeds: [embedMod] });
+            );
+        await interaction.reply({ embeds: [embedMod] });
     }
 };
